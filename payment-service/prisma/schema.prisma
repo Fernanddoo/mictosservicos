@@ -1,0 +1,28 @@
+// payment-service/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentMethod {
+  CREDITO
+  DEBITO
+  PIX
+  BOLETO
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  orderId   String
+  paymentMethod PaymentMethod
+  value     Decimal  @db.Decimal(10, 2)
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@map("payments")
+}
