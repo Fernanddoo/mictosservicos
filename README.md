@@ -7,3 +7,7 @@
 - aplicar migration nos docker files dos bancos.
 - aplicar axios nos chamados pedido -> pagamento e depois pagamento -> pedido e produto.
 - deleção lógica dos produtos.
+
+### Próximo passo:
+
+- teste de carga (ver quanto um endpoint é requisitado) (k6 + influxdb + grafana) descobrir quanto a aplicação aguenta.

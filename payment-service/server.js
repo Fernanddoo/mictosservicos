@@ -1,9 +1,13 @@
 const express = require('express');
 const { PrismaClient, Prisma } = require('@prisma/client');
+const axios = require('axios');
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
+
+const ORDER_SERVICE = process.env.ORDER_SERVICE_URL;
+const PRODUCT_SERVICE = process.env.PRODUCT_SERVICE_URL;
 
 async function sendNotification(message, orderId) {
     console.log("--- Disparando Notificação ---");
@@ -20,13 +24,11 @@ app.get('/', (req, res) => {
 
 // POST /payments: Processa um pagamento
 app.post('/payments', async (req, res) => {
-    const { orderId, paymentMethod, value } = req.body;
-
-    if (!orderId || !paymentMethod || !value) {
-        return res.status(400).json({ error: 'Dados do pagamento incompletos.' });
+    const { orderId, paymentMethod, value, products } = req.body; 
+    if (!orderId || !paymentMethod || !value || !products) {
+        return res.status(400).json({ error: 'Dados do pagamento incompletos (precisa de orderId, paymentMethod, value, products).' });
     }
 
-    // Lógica de simulação de sucesso/falha do pagamento
     const success = Math.random() > 0.2; // 80% de chance de sucesso
 
     try {
@@ -39,17 +41,33 @@ app.post('/payments', async (req, res) => {
             }
         });
 
-        // --- CHAMADA DA NOTIFICAÇÃO ---
-        // Dispara a notificação com base no sucesso ou falha do pagamento.
         if (payment.success) {
-            sendNotification('Pagamento APROVADO com sucesso!', payment.orderId);
-        } else {
-            sendNotification('Pagamento RECUSADO. Por favor, tente novamente.', payment.orderId);
-        }
-        // -----------------------------
+            try {
+                // Avisa o product-service para baixar o estoque
+                const stockUpdatePayload = products.map(item => ({
+                    productId: item.productId,
+                    quantity: -item.quantity // Quantidade negativa para decrementar
+                }));
+                await axios.post(`${PRODUCT_SERVICE}/produtos/update-stock`, { items: stockUpdatePayload });
 
-        // Retorna o resultado para o order-service
-        res.status(201).json(payment);
+                await axios.patch(`${ORDER_SERVICE}/pedidos/${orderId}/status`, { status: 'PAGO' });
+
+                sendNotification('Pagamento APROVADO com sucesso!', payment.orderId);
+                
+                // Retorna sucesso para o cliente
+                res.status(201).json(payment);
+
+            } catch (sagaError) {
+                console.error("ERRO PÓS-PAGAMENTO:", sagaError.message);
+                res.status(500).json({ error: 'Pagamento aprovado, mas falha ao atualizar pedido/estoque.' });
+            }
+        } else {
+            // Pagamento falhou
+            await axios.patch(`${ORDER_SERVICE}/pedidos/${orderId}/status`, { status: 'FALHA_NO_PAGAMENTO' });
+            sendNotification('Pagamento RECUSADO. Por favor, tente novamente.', payment.orderId);
+            res.status(400).json({ message: 'Pagamento falhou.', payment });
+        }
+
     } catch (error) {
         console.error("ERRO NO PAYMENT-SERVICE:", error);
         res.status(500).json({ error: 'Não foi possível processar o pagamento.' });

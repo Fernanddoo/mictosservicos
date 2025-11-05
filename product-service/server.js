@@ -13,29 +13,36 @@ app.get('/', (req, res) => {
 // --- ROTAS DE PRODUTOS ---
 
 // GET /produtos: Lista todos os produtos disponíveis.
-app.get('/produtos', async (req, res) => {  
-  try {
-    const products = await prisma.product.findMany();
-    res.status(200).json(products);
-  } catch (error) {
-    res.status(500).json({ error: 'Não foi possível buscar os produtos.' });
-  }
+app.get('/produtos', async (req, res) => { 
+    try {
+        const products = await prisma.product.findMany({
+            where: { isActive: true }
+        });
+        res.status(200).json(products);
+    } catch (error) {
+        res.status(500).json({ error: 'Não foi possível buscar os produtos.' });
+    }
 });
 
 // GET /produtos/:id: Busca um produto pelo ID.
 app.get('/produtos/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const product = await prisma.product.findUnique({ where: { id: parseInt(id) } });
-    if (!product) {
-      return res.status(404).json({ error: 'Produto não encontrado.' });
+    const { id } = req.params;
+    try {
+        const product = await prisma.product.findFirst({ // Mudado para findFirst
+            // --- MODIFICADO AQUI ---
+            where: { 
+                id: parseInt(id),
+                isActive: true 
+            }
+        });
+        if (!product) {
+            return res.status(404).json({ error: 'Produto não encontrado.' });
+        }
+        res.status(200).json(product);
+    } catch (error) {
+        res.status(500).json({ error: 'Não foi possível buscar o produto.' });
     }
-    res.status(200).json(product);
-  } catch (error) {
-    res.status(500).json({ error: 'Não foi possível buscar o produto.' });
-  }
 });
-
 
 // POST /produtos: Adiciona um novo produto.
 app.post('/produtos', async (req, res) => {
@@ -103,16 +110,19 @@ app.post('/produtos/:id/estoque', async (req, res) => {
 
 // DELETE /produtos/:id Deleta o produto específico pelo ID.
 app.delete('/produtos/:id', async (req, res) => {
-  const { id } = req.params;
-  try {
-    await prisma.product.delete({ where: { id: parseInt(id, 10) } });
-    res.status(204).send('Produto deletado com sucesso!'); // No Content
-  } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Produto não encontrado.' });
+    const { id } = req.params;
+    try {
+        await prisma.product.update({
+            where: { id: parseInt(id, 10) },
+            data: { isActive: false }
+        });
+        res.status(204).send(); // No Content
+    } catch (error) {
+        if (error.code === 'P2025') {
+            return res.status(404).json({ error: 'Produto não encontrado.' });
+        }
+        res.status(500).json({ error: 'Não foi possível deletar o produto.' });
     }
-    res.status(500).json({ error: 'Não foi possível deletar o produto.' });
-  }
 });
 
 // Usada pelo order-service para decrementar ou reverter estoque

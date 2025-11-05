@@ -13,4 +13,5 @@ model Product {
   price     Decimal  @db.Decimal(10, 2)
   stock     Int
   createdAt DateTime @default(now())
+  isActive  Boolean  @default(true)
 }

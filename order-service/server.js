@@ -116,59 +116,29 @@ app.post('/pedidos', async (req, res) => {
     }
 });
 
-// POST /pedidos/:id/pagamento: Processa o pagamento de um pedido
-app.post('/pedidos/:id/pagamento', async (req, res) => {
+app.patch('/pedidos/:id/status', async (req, res) => {
     const { id } = req.params;
-    const { paymentMethod, value } = req.body; // Dados do pagamento
+    const { status } = req.body;
+
+    if (!status) {
+        return res.status(400).json({ error: 'Status é obrigatório.' });
+    }
 
     try {
-        // Encontra o pedido
-        const order = await Order.findById(id);
+        const order = await Order.findByIdAndUpdate(
+            id,
+            { $set: { status: status } },
+            { new: true } // Retorna o documento atualizado
+        );
+
         if (!order) {
             return res.status(404).json({ error: 'Pedido não encontrado.' });
         }
-        if (order.status !== 'AGUARDANDO_PAGAMENTO') {
-            return res.status(409).json({ error: `Este pedido não pode ser pago pois seu status é "${order.status}".` });
-        }
-
-        // Chama o serviço de pagamento
-        const paymentResponse = await axios.post(`${PAYMENT_SERVICE}/payments`, {
-            orderId: order.id, 
-            paymentMethod,
-            value
-        });
-        const paymentResult = paymentResponse.data;
-
-        // Trata o resultado do pagamento
-        if (paymentResult.success) {
-            // PAGAMENTO APROVADO: Decrementar o estoque
-            const stockUpdatePayload = order.products.map(item => ({
-                productId: item.productId,
-                quantity: -item.quantity // Quantidade negativa para decrementar
-            }));
-            await axios.post(`${PRODUCT_SERVICE}/produtos/update-stock`, { items: stockUpdatePayload });
-
-            // Atualizar o status do pedido para PAGO
-            order.status = 'PAGO';
-            await order.save();
-            
-            res.status(200).json({ message: 'Pagamento aprovado e estoque atualizado!', order });
-
-        } else {
-            // PAGAMENTO FALHOU: Apenas atualizar o status
-            order.status = 'FALHA_NO_PAGAMENTO';
-            await order.save();
-            
-            res.status(400).json({ message: 'Pagamento falhou.', order });
-        }
-
-    } catch (error) {
-
-        console.error("ERRO DETALHADO NO PAGAMENTO:", error);
         
-        const status = error.response ? error.response.status : 500;
-        const message = error.response ? error.response.data.error : error.message;
-        res.status(status).json({ error: `Falha ao processar pagamento: ${message}` });
+        console.log(`[Order Service] Pedido ${id} atualizado para ${status}`);
+        res.status(200).json(order);
+    } catch (error) {
+        res.status(500).json({ error: 'Falha ao atualizar status do pedido.' });
     }
 });
 

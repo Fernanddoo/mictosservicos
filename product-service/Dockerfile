@@ -10,5 +10,9 @@ COPY . .
 # Instala o Prisma Client
 RUN npx prisma generate
 
+COPY docker-entrypoint.sh /usr/src/app/
+RUN chmod +x /usr/src/app/docker-entrypoint.sh
+
 EXPOSE 3001
+ENTRYPOINT [ "/usr/src/app/docker-entrypoint.sh" ]
 CMD [ "node", "server.js" ]
