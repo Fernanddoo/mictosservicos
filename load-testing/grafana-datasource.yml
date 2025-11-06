@@ -1,0 +1,13 @@
+apiVersion: 1
+
+datasources:
+  - name: InfluxDB-k6
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086 # URL interna do Docker
+    jsonData:
+      version: Flux
+      organization: sua-org # DEVE SER O MESMO NOME DO PASSO 3
+      defaultBucket: k6-results
+    secureJsonData:
+      token: seu-token-super-secreto # DEVE SER O MESMO TOKEN DO PASSO 3
