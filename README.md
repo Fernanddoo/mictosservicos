@@ -10,10 +10,23 @@
 
 ### Próximo passo:
 
-- teste de carga (ver quanto um endpoint é requisitado) (k6 + influxdb + grafana) descobrir quanto a aplicação aguenta.
+- teste de carga (ver quanto um endpoint é requisitado) (k6 + influxdb + grafana) descobrir quanto a aplicação aguenta. OK
 
 - para rodar o teste:
 
 ```bash
-    docker-compose run --rm k6 run /scripts/script.js
+    docker-compose run --rm k6 run --out influxdb=http://influxdb:8086/k6-payments /scripts/script.js
 ```
+
+### Novas etapas:
+
+06/11
+
+- Separar os testes para cada endpoint para identificar o maior gargalo
+- Separar notificação em um microsserviço também
+
+### Implementar
+
+- RabbitMQ para notificações, consumindo de pedido
+- Criar uma fila para ler as notificações
+- notificação não é mais sincrona com o pagamento, não parte mais dele

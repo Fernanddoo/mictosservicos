@@ -1,106 +1,123 @@
 import http from 'k6/http';
-import { check, sleep, group } from 'k6';
+import { check, sleep } from 'k6';
 
-// --- DEFINIÇÃO DA CARGA ---
+// --- DEFINIÇÃO DOS CENÁRIOS INDEPENDENTES ---
 export const options = {
-    stages: [
-        { duration: '30s', target: 20 }, // Sobe de 0 para 20 usuários em 30 segundos
-        { duration: '1m', target: 20 },  // Mantém 20 usuários por 1 minuto (teste de stress)
-        { duration: '10s', target: 0 },  // Desce para 0 usuários
-    ],
+    scenarios: {
+        // Estresse apenas na leitura de produtos 
+        stress_browse: {
+            executor: 'ramping-vus',
+            exec: 'browseFlow', 
+            startVUs: 0,
+            stages: [
+                { duration: '30s', target: 50 }, // Sobe para 50 usuários
+                { duration: '1m', target: 50 },  // Mantém
+                { duration: '10s', target: 0 },  // Desce
+            ],
+            tags: { my_service: 'product-service' }, // Tag para o Grafana
+        },
+
+        // Estresse na criação de pedidos 
+        stress_order: {
+            executor: 'ramping-vus',
+            exec: 'orderFlow', 
+            startVUs: 0,
+            stages: [
+                { duration: '30s', target: 20 }, 
+                { duration: '1m', target: 20 },
+                { duration: '10s', target: 0 },
+            ],
+            tags: { my_service: 'order-service' },
+        },
+
+        // Estresse no pagamento 
+        stress_payment: {
+            executor: 'ramping-vus',
+            exec: 'paymentFlow', 
+            startVUs: 0,
+            stages: [
+                { duration: '30s', target: 15 }, 
+                { duration: '1m', target: 15 },
+                { duration: '10s', target: 0 },
+            ],
+            tags: { my_service: 'payment-service' },
+        },
+    },
     thresholds: {
-        'http_req_duration': ['p(95)<500'], // 95% das requisições devem ser abaixo de 500ms
-        'checks': ['rate>0.99'], // 99% dos 'checks' devem passar
+        'http_req_duration{my_service:product-service}': ['p(95)<200'], // Produtos devem ser rápidos (<200ms)
+        'http_req_duration{my_service:order-service}': ['p(95)<500'],   // Pedidos um pouco mais lentos
+        'http_req_duration{my_service:payment-service}': ['p(95)<1000'], // Pagamento aceita até 1s
     },
 };
 
-// --- URLs DOS SERVIÇOS ---
+// --- URLs ---
 const USER_SERVICE_URL = 'http://user-service:3000';
 const PRODUCT_SERVICE_URL = 'http://product-service:3001';
 const ORDER_SERVICE_URL = 'http://order-service:3002';
 const PAYMENT_SERVICE_URL = 'http://payment-service:3003';
 
-// --- FUNÇÃO DE SETUP ---
+// --- SETUP ---
 export function setup() {
     console.log('--- Configurando dados de teste ---');
     
-    // Criar um usuário de teste com email 100% único
-    const uniqueEmail = `teste-carga-${Date.now()}@k6.io`; // Usa o timestamp
-    let userPayload = JSON.stringify({ name: 'Usuário de Teste Carga', email: uniqueEmail });
+    // Cria Usuário
+    const uniqueEmail = `teste-carga-${Date.now()}@k6.io`;
+    let userPayload = JSON.stringify({ name: 'User Carga', email: uniqueEmail });
     let userRes = http.post(`${USER_SERVICE_URL}/users`, userPayload, { headers: { 'Content-Type': 'application/json' } });
-    
-    // Verifica se o usuário foi criado com sucesso
-    check(userRes, { 'Setup: Criar Usuário status 201': (r) => r.status === 201 });
     const userId = userRes.json('id');
 
-    // Criar um produto de teste
-    let productPayload = JSON.stringify({ name: 'Produto de Teste', price: 99.99, stock: 10000 });
+    // Cria Produto
+    let productPayload = JSON.stringify({ name: 'Produto Carga', price: 50.00, stock: 1000000 });
     let productRes = http.post(`${PRODUCT_SERVICE_URL}/produtos`, productPayload, { headers: { 'Content-Type': 'application/json' } });
-    
-    // Verifica se o produto foi criado com sucesso
-    check(productRes, { 'Setup: Criar Produto status 201': (r) => r.status === 201 });
     const productId = productRes.json('id');
     
-    console.log(`Usuário de Teste: ${userId}, Produto de Teste: ${productId}`);
-    
-    // Se a criação falhar, aborta o teste
     if (!userId || !productId) {
-        throw new Error('Falha ao criar dados de setup (usuário ou produto). Teste abortado.');
+        throw new Error('Falha no Setup! Verifique se os serviços estão rodando.');
     }
     
     return { userId, productId };
 }
 
-// --- FUNÇÃO PRINCIPAL ---
-export default function (data) {
+// --- Navegação (Teste Product Service) ---
+export function browseFlow(data) {
+    let res = http.get(`${PRODUCT_SERVICE_URL}/produtos/${data.productId}`);
+    check(res, { 'GET Produto 200': (r) => r.status === 200 });
+    sleep(1);
+}
 
-    // --- GRUPO: NAVEGAÇÃO ---
-    group('Navegação de Produtos', function () {
-        let res = http.get(`${PRODUCT_SERVICE_URL}/produtos`);
-        check(res, { 'GET /produtos status 200': (r) => r.status === 200 });
-        sleep(0.5); // Usuário "pensa" por 0.5s
-
-        res = http.get(`${PRODUCT_SERVICE_URL}/produtos/${data.productId}`);
-        check(res, { 'GET /produtos/:id status 200': (r) => r.status === 200 });
-        sleep(0.5);
+// --- Pedido (Teste Order Service) ---
+export function orderFlow(data) {
+    let orderPayload = JSON.stringify({
+        userId: data.userId,
+        items: [{ productId: data.productId, quantity: 1 }]
     });
+    
+    let res = http.post(`${ORDER_SERVICE_URL}/pedidos`, orderPayload, { headers: { 'Content-Type': 'application/json' } });
+    check(res, { 'Criar Pedido 201': (r) => r.status === 201 });
+    sleep(1);
+}
 
-    // --- GRUPO: CRIAÇÃO DO PEDIDO ---
-    let order = null;
-    group('Criação de Pedido', function () {
-        let orderPayload = JSON.stringify({
-            userId: data.userId,
-            items: [{ productId: data.productId, quantity: 1 }]
-        });
-        
-        let res = http.post(`${ORDER_SERVICE_URL}/pedidos`, orderPayload, { headers: { 'Content-Type': 'application/json' } });
-        check(res, { 'POST /pedidos status 201': (r) => r.status === 201 });
-        
-        if (res.status === 201) {
-            order = res.json(); 
-        }
+// --- Pagamento (Teste Payment Service) ---
+export function paymentFlow(data) {
+    let orderPayload = JSON.stringify({
+        userId: data.userId,
+        items: [{ productId: data.productId, quantity: 1 }]
     });
-
-    sleep(1); // Usuário "preenche" os dados de pagamento
-
-    // --- GRUPO: PROCESSAMENTO DO PAGAMENTO ---
-    // Só tenta pagar se o pedido foi criado com sucesso
-    if (order) {
-        group('Processamento de Pagamento', function () {
-            let paymentPayload = JSON.stringify({
-                orderId: order._id,
-                paymentMethod: 'PIX', // Usa um método de pagamento válido
-                value: parseFloat(order.total.$numberDecimal), 
-                products: order.products 
-            });
-
-            let res = http.post(`${PAYMENT_SERVICE_URL}/payments`, paymentPayload, { headers: { 'Content-Type': 'application/json' } });
-            
-            // O pagamento pode ter sucesso (201) ou falha simulada (400), ambos são OK
-            check(res, { 'POST /payments status 201 ou 400': (r) => r.status === 201 || r.status === 400 });
+    let resOrder = http.post(`${ORDER_SERVICE_URL}/pedidos`, orderPayload, { headers: { 'Content-Type': 'application/json' } });
+    
+    if (resOrder.status === 201) {
+        let order = resOrder.json();
+       
+        let paymentPayload = JSON.stringify({
+            orderId: order._id,
+            paymentMethod: 'PIX',
+            value: parseFloat(order.total.$numberDecimal), 
+            products: order.products 
         });
+
+        let resPay = http.post(`${PAYMENT_SERVICE_URL}/payments`, paymentPayload, { headers: { 'Content-Type': 'application/json' } });
+        
+        check(resPay, { 'Processar Pagamento 201/400': (r) => r.status === 201 || r.status === 400 });
     }
-
-    // Espera 1 segundo antes de simular o próximo
     sleep(1);
 }

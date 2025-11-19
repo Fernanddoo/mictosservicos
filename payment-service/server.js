@@ -1,21 +1,40 @@
 const express = require('express');
 const { PrismaClient, Prisma } = require('@prisma/client');
 const axios = require('axios');
+const amqp = require('amqplib');
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
 
+let channel;
+const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://user:password@rabbitmq:5672';
+const QUEUE_NAME = 'payment_notifications';
+
+async function connectRabbit() {
+    try {
+        const connection = await amqp.connect(RABBITMQ_URL);
+        channel = await connection.createChannel();
+        await channel.assertQueue(QUEUE_NAME, { durable: true });
+        console.log('Conectado ao RabbitMQ para enviar notificações.');
+    } catch (error) {
+        console.error('Erro ao conectar RabbitMQ:', error.message);
+    }
+}
+connectRabbit(); 
+
+// Função auxiliar para publicar na fila
+function publishNotification(data) {
+    if (!channel) {
+        console.error("RabbitMQ não está pronto, notificação perdida.");
+        return;
+    }
+    channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(data)), { persistent: true });
+    console.log(`[EVENTO] Notificação enviada para a fila: Pedido ${data.orderId}`);
+}
+
 const ORDER_SERVICE = process.env.ORDER_SERVICE_URL;
 const PRODUCT_SERVICE = process.env.PRODUCT_SERVICE_URL;
-
-async function sendNotification(message, orderId) {
-    console.log("--- Disparando Notificação ---");
-    // Simula um pequeno atraso, como se estivesse se comunicando com um serviço externo
-    await new Promise(resolve => setTimeout(resolve, 1000)); 
-    console.log(`[NOTIFICAÇÃO] Para o pedido ${orderId}: ${message}`);
-    console.log("----------------------------");
-}
 
 // GET genérico
 app.get('/', (req, res) => {
@@ -52,7 +71,11 @@ app.post('/payments', async (req, res) => {
 
                 await axios.patch(`${ORDER_SERVICE}/pedidos/${orderId}/status`, { status: 'PAGO' });
 
-                sendNotification('Pagamento APROVADO com sucesso!', payment.orderId);
+                publishNotification({
+                    orderId: payment.orderId,
+                    status: 'APROVADO',
+                    message: 'Seu pagamento foi confirmado!'
+                });
                 
                 // Retorna sucesso para o cliente
                 res.status(201).json(payment);
@@ -64,7 +87,13 @@ app.post('/payments', async (req, res) => {
         } else {
             // Pagamento falhou
             await axios.patch(`${ORDER_SERVICE}/pedidos/${orderId}/status`, { status: 'FALHA_NO_PAGAMENTO' });
-            sendNotification('Pagamento RECUSADO. Por favor, tente novamente.', payment.orderId);
+
+            publishNotification({
+                orderId: payment.orderId,
+                status: 'RECUSADO',
+                message: 'Pagamento recusado pela operadora.'
+            });
+            
             res.status(400).json({ message: 'Pagamento falhou.', payment });
         }
 
