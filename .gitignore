@@ -1,9 +1,6 @@
 node_modules
 kk
 
-# Docker
-docker-compose.yml
-
 # envs
 .env
 .env.local

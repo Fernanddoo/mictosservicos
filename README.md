@@ -1,32 +1,56 @@
-# microsservicos
+# Curls - microsservicos
 
-### faltou/corrigir:
+## User Service
+curl http://localhost:3000/
 
-- mais de um tipo de método de pagamento. OK
-- mover lógica do :id/pagmentos para o serviço de pagamento. OK
-- aplicar migration nos docker files dos bancos. OK
-- aplicar axios nos chamados pedido -> pagamento e depois pagamento -> pedido e produto. OK
-- deleção lógica dos produtos. OK
+### Criar um usuário
+curl -X POST http://localhost:3000/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Professor Avaliador", "email": "prof@facul.edu.br", "role": "CLIENT"}'
 
-### Próximo passo:
+curl http://localhost:3000/users/1
 
-- teste de carga (ver quanto um endpoint é requisitado) (k6 + influxdb + grafana) descobrir quanto a aplicação aguenta. OK
+## Product Service
+curl http://localhost:3001/
 
-- para rodar o teste:
+### Criar um produto
+curl -X POST http://localhost:3001/produtos \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Notebook Gamer", "price": 5000.00, "stock": 10}'
 
-```bash
-    docker-compose run --rm k6 run --out influxdb=http://influxdb:8086/k6-payments /scripts/script.js
-```
+curl -X POST http://localhost:3001/produtos \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Mouse Sem Fio", "price": 100.00, "stock": 50}'
 
-### Novas etapas:
+### GET por ID
+curl http://localhost:3001/produtos/1
 
-06/11
+### Atualizar estoque
+curl -X POST http://localhost:3001/produtos/1/estoque \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 5}'
 
-- Separar os testes para cada endpoint para identificar o maior gargalo
-- Separar notificação em um microsserviço também
+## Order Service
+curl http://localhost:3002/
 
-### Implementar
+### Criar um pedido
+curl -X POST http://localhost:3002/pedidos \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": 1,
+    "items": [
+        {"productId": 1, "quantity": 1},
+        {"productId": 2, "quantity": 2}
+    ]
+}'
 
-- RabbitMQ para notificações, consumindo de pedido
-- Criar uma fila para ler as notificações
-- notificação não é mais sincrona com o pagamento, não parte mais dele
+### GET por ID
+curl http://localhost:3002/pedidos/:ORDER_ID
+
+## Payment Service
+curl http://localhost:3003/
+
+### Criar um pagamento
+curl -X POST http://localhost:3003/payments/:ORDER_ID/process \
+  -H "Content-Type: application/json" \
+  -d '{"paymentMethod": "PIX"}'

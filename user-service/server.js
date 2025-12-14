@@ -1,9 +1,18 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+const Redis = require('ioredis');
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
+
+const redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: process.env.REDIS_PORT || 6379,
+});
+
+redis.on('connect', () => console.log('User Service conectado ao Redis!'));
+redis.on('error', (err) => console.error('Erro no Redis:', err));
 
 // GET genérico
 app.get('/', (req, res) => {
@@ -23,13 +32,28 @@ app.get('/users', async (req, res) => {
 // GET /users/:id: Retorna um usuário específico
 app.get('/users/:id', async (req, res) => {
     const { id } = req.params;
+    const cacheKey = `user:${id}`;
+
     try {
+        const cachedUser = await redis.get(cacheKey);
+
+        if (cachedUser) {
+            console.log(`[CACHE HIT] Usuário ${id} recuperado do Redis ⚡`);
+            return res.status(200).json(JSON.parse(cachedUser));
+        }
+
+        console.log(`[CACHE MISS] Buscando usuário ${id} no Banco...`);
         const user = await prisma.user.findUnique({ where: { id: parseInt(id) } });
+        
         if (!user) {
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
+
+        await redis.set(cacheKey, JSON.stringify(user), 'EX', 3600);
+
         res.status(200).json(user);
     } catch (error) {
+        console.error(error);
         res.status(500).json({ error: "Não foi possível encontrar o usuário." });
     }
 });
@@ -45,7 +69,7 @@ app.post('/users', async (req, res) => {
             data: { 
                 name, 
                 email,
-                // Se o 'role' não for enviado na requisição, o Prisma usará o padrão 'CLIENT'
+                // Se o 'role' não for enviado na requisição, usa por padrão 'CLIENT'
                 role: role 
             },
         });

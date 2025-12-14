@@ -1,0 +1,225 @@
+services:
+  # BANCOS DE DADOS 
+  user-db:
+    image: postgres:13
+    container_name: user-db
+    restart: always
+    ports:
+      - "5432:5432" # Mapeia a porta do host para a porta do contêiner
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: user_db
+    volumes:
+      - user_db_data:/var/lib/postgresql/data
+
+  product-db:
+    image: postgres:13
+    container_name: product-db
+    restart: always
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: product_db
+    volumes:
+      - product_db_data:/var/lib/postgresql/data
+
+  payment-db:
+    image: postgres:13
+    container_name: payment-db
+    restart: always
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payment_db
+    volumes:
+      - payment_db_data:/var/lib/postgresql/data
+
+  order-db:
+    image: mongo:5.0
+    container_name: order-db
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - order_db_data:/data/db
+
+  # MICROSSERVIÇOS 
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    restart: on-failure
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "postgresql://user:password@user-db:5432/user_db"
+      PORT_SERVER: 3000
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+    depends_on:
+      - user-db
+      - redis
+    command: sh -c "sleep 5 && npx prisma generate && npx prisma migrate dev --name init_auto && node server.js"
+
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    restart: on-failure
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: "postgresql://user:password@product-db:5432/product_db"
+      PORT_SERVER: 3001
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+    depends_on:
+      - product-db
+      - redis
+    command: sh -c "sleep 5 && npx prisma generate && npx prisma migrate dev --name init_auto && node server.js"
+
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    restart: on-failure
+    ports:
+      - "3002:3002"
+    environment:
+      DATABASE_URL: "mongodb://order-db:27017/order_db"
+      PORT_SERVER: 3002
+      USER_SERVICE_URL: "http://user-service:3000"
+      PRODUCT_SERVICE_URL: "http://product-service:3001"
+      PAYMENT_SERVICE_URL: "http://payment-service:3003"
+    depends_on:
+      - order-db
+      - user-service
+      - product-service
+      - kafka
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    restart: on-failure
+    volumes:
+      - /usr/src/app/node_modules
+      - ./payment-service:/usr/src/app
+    ports:
+      - "3003:3003"
+    environment:
+      DATABASE_URL: "postgresql://user:password@payment-db:5432/payment_db"
+      PORT_SERVER: 3003
+      ORDER_SERVICE_URL: "http://order-service:3002"
+      PRODUCT_SERVICE_URL: "http://product-service:3001"
+      RABBITMQ_URL: "amqp://user:password@rabbitmq:5672"
+      KAFKA_BROKER: "kafka:29092"
+    depends_on:
+      - payment-db
+      - order-service
+      - product-service
+      - rabbitmq
+      - kafka
+    command: sh -c "sleep 5 && npx prisma generate && npx prisma migrate dev --name init_auto && node server.js"
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # Porta padrão de comunicação
+      - "15672:15672" # Porta da interface visual 
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+  
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    restart: on-failure
+    depends_on:
+      - rabbitmq 
+    environment:
+      RABBITMQ_URL: "amqp://user:password@rabbitmq:5672"
+  
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    restart: always
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+      - ./influxdb-init/init-influxdb.sh:/docker-entrypoint-initdb.d/init-influxdb.sh
+    environment:
+     - INFLUXDB_DB=k6
+     - INFLUXDB_HTTP_AUTH_ENABLED=false
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: grafana
+    restart: always
+    ports:
+      - "3004:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  k6:
+    build:
+      context: ./load-testing
+      dockerfile: k6.Dockerfile
+    container_name: k6
+    depends_on:
+      - influxdb
+      - user-service
+      - product-service
+      - order-service
+      - payment-service
+    volumes:
+      # Mapeia a pasta com o script de teste para dentro do contêiner
+      - ./load-testing:/scripts
+    environment:
+      # Envia os resultados do k6 para o InfluxDB
+      - K6_OUT=xk6-influxdb=http://influxdb:8086
+      - K6_INFLUXDB_TOKEN=seu-token-super-secreto 
+  
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+  
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  user_db_data:
+  product_db_data:
+  payment_db_data:
+  order_db_data:
+  influxdb_data:
+  grafana_data:

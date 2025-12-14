@@ -10,12 +10,12 @@ async function startConsumer() {
         const connection = await amqp.connect(RABBITMQ_URL);
         const channel = await connection.createChannel();
 
-        // Garante que a fila existe (Idempotência)
+        // Garante que a fila existe 
         await channel.assertQueue(QUEUE_NAME, { durable: true });
 
         console.log(`[*] Aguardando mensagens na fila: ${QUEUE_NAME}`);
 
-        // Consome a mensagem"
+        // Consome a mensagem
         channel.consume(QUEUE_NAME, (msg) => {
             if (msg !== null) {
                 const content = JSON.parse(msg.content.toString());
@@ -26,7 +26,6 @@ async function startConsumer() {
                 console.log(`Mensagem: ${content.message}`);
                 console.log("-----------------------------");
 
-                // Confirma o recebimento (ACK) para retirar da fila
                 channel.ack(msg);
             }
         });

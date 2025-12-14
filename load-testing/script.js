@@ -1,7 +1,6 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
-// --- DEFINIÇÃO DOS CENÁRIOS INDEPENDENTES ---
 export const options = {
     scenarios: {
         // Estresse apenas na leitura de produtos 
@@ -44,19 +43,19 @@ export const options = {
         },
     },
     thresholds: {
-        'http_req_duration{my_service:product-service}': ['p(95)<200'], // Produtos devem ser rápidos (<200ms)
-        'http_req_duration{my_service:order-service}': ['p(95)<500'],   // Pedidos um pouco mais lentos
-        'http_req_duration{my_service:payment-service}': ['p(95)<1000'], // Pagamento aceita até 1s
+        'http_req_duration{my_service:product-service}': ['p(95)<200'], 
+        'http_req_duration{my_service:order-service}': ['p(95)<500'],  
+        'http_req_duration{my_service:payment-service}': ['p(95)<1000'], 
     },
 };
 
-// --- URLs ---
+// URLs 
 const USER_SERVICE_URL = 'http://user-service:3000';
 const PRODUCT_SERVICE_URL = 'http://product-service:3001';
 const ORDER_SERVICE_URL = 'http://order-service:3002';
 const PAYMENT_SERVICE_URL = 'http://payment-service:3003';
 
-// --- SETUP ---
+// SETUP
 export function setup() {
     console.log('--- Configurando dados de teste ---');
     
@@ -78,14 +77,14 @@ export function setup() {
     return { userId, productId };
 }
 
-// --- Navegação (Teste Product Service) ---
+// Navegação (Teste Product Service)
 export function browseFlow(data) {
     let res = http.get(`${PRODUCT_SERVICE_URL}/produtos/${data.productId}`);
     check(res, { 'GET Produto 200': (r) => r.status === 200 });
     sleep(1);
 }
 
-// --- Pedido (Teste Order Service) ---
+// Pedido (Teste Order Service) 
 export function orderFlow(data) {
     let orderPayload = JSON.stringify({
         userId: data.userId,
@@ -97,7 +96,7 @@ export function orderFlow(data) {
     sleep(1);
 }
 
-// --- Pagamento (Teste Payment Service) ---
+// Pagamento (Teste Payment Service) 
 export function paymentFlow(data) {
     let orderPayload = JSON.stringify({
         userId: data.userId,

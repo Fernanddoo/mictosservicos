@@ -1,5 +1,3 @@
-# Dockerfile para order-service
-
 FROM node:18
 
 WORKDIR /usr/src/app

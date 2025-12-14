@@ -1,16 +1,26 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
+const Redis = require('ioredis');
 
 const prisma = new PrismaClient();
 const app = express();
 app.use(express.json());
+
+const redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: process.env.REDIS_PORT || 6379,
+});
+
+redis.on('connect', () => console.log('Product Service conectado ao Redis!'));
+redis.on('error', (err) => console.error('Erro no Redis:', err));
+
 
 // GET genérico
 app.get('/', (req, res) => {
     res.send('Ta rodando, product-service!')
 })
 
-// --- ROTAS DE PRODUTOS ---
+// ROTAS DE PRODUTOS
 
 // GET /produtos: Lista todos os produtos disponíveis.
 app.get('/produtos', async (req, res) => { 
@@ -24,22 +34,36 @@ app.get('/produtos', async (req, res) => {
     }
 });
 
-// GET /produtos/:id: Busca um produto pelo ID.
+// GET /produtos/:id: Busca um produto pelo ID (cache do redis)
 app.get('/produtos/:id', async (req, res) => {
     const { id } = req.params;
+    const cacheKey = `product:${id}`;
+
     try {
-        const product = await prisma.product.findFirst({ // Mudado para findFirst
-            // --- MODIFICADO AQUI ---
+        const cachedProduct = await redis.get(cacheKey);
+        
+        if (cachedProduct) {
+            console.log(`[CACHE HIT] Produto ${id} vindo do Redis ⚡`);
+            return res.status(200).json(JSON.parse(cachedProduct));
+        }
+
+        console.log(`[CACHE MISS] Buscando produto ${id} no Banco...`);
+        const product = await prisma.product.findFirst({
             where: { 
                 id: parseInt(id),
                 isActive: true 
             }
         });
+
         if (!product) {
             return res.status(404).json({ error: 'Produto não encontrado.' });
         }
+
+        await redis.set(cacheKey, JSON.stringify(product), 'EX', 3600);
+
         res.status(200).json(product);
     } catch (error) {
+        console.error(error);
         res.status(500).json({ error: 'Não foi possível buscar o produto.' });
     }
 });
@@ -72,6 +96,10 @@ app.put('/produtos/:id', async (req, res) => {
       where: { id: parseInt(id, 10) },
       data: { name, price },
     });
+
+    await redis.del(`product:${id}`);
+    console.log(`[CACHE DEL] Cache do produto ${id} invalidado após update.`);
+
     res.status(200).json(updatedProduct);
   } catch (error) {
     if (error.code === 'P2025') {
@@ -99,6 +127,10 @@ app.post('/produtos/:id/estoque', async (req, res) => {
                 },
             },
         });
+
+        await redis.del(`product:${id}`);
+        console.log(`[CACHE DEL] Cache do produto ${id} invalidado após entrada de estoque.`);
+
         res.status(200).json({ message: 'Estoque atualizado com sucesso.', product: updatedProduct });
     } catch (error) {
         if (error.code === 'P2025') {
@@ -116,6 +148,10 @@ app.delete('/produtos/:id', async (req, res) => {
             where: { id: parseInt(id, 10) },
             data: { isActive: false }
         });
+
+        await redis.del(`product:${id}`);
+        console.log(`[CACHE DEL] Cache do produto ${id} removido (Soft Delete).`);
+
         res.status(204).send(); // No Content
     } catch (error) {
         if (error.code === 'P2025') {
@@ -125,7 +161,7 @@ app.delete('/produtos/:id', async (req, res) => {
     }
 });
 
-// Usada pelo order-service para decrementar ou reverter estoque
+// Usado pelo order-service para decrementar ou reverter estoque
 app.post('/produtos/update-stock', async (req, res) => {
     const { items } = req.body; // items: [{ productId: 1, quantity: -2 }, { productId: 2, quantity: 2 }]
 
@@ -134,7 +170,6 @@ app.post('/produtos/update-stock', async (req, res) => {
     }
 
     try {
-        // Isso precisa ser uma transação para garantir atomicidade
         const updatedProducts = await prisma.$transaction(
             items.map(item => 
                 prisma.product.update({
@@ -147,6 +182,13 @@ app.post('/produtos/update-stock', async (req, res) => {
                 })
             )
         );
+
+        const keysToDelete = items.map(item => `product:${item.productId}`);
+        if (keysToDelete.length > 0) {
+            await redis.del(...keysToDelete);
+            console.log(`[CACHE DEL] Itens do pedido removidos do cache: ${keysToDelete.join(', ')}`);
+        }
+        
         res.status(200).json(updatedProducts);
     } catch (error) {
         // P2025: Ocorre se um produto não for encontrado

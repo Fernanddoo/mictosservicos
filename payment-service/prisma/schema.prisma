@@ -19,7 +19,8 @@ enum PaymentMethod {
 model Payment {
   id        Int      @id @default(autoincrement())
   orderId   String
-  paymentMethod PaymentMethod
+  paymentMethod PaymentMethod?
+  status        String         @default("PENDING_PROCESS")
   value     Decimal  @db.Decimal(10, 2)
   success   Boolean
   createdAt DateTime @default(now())
