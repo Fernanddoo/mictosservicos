@@ -54,3 +54,77 @@ curl http://localhost:3003/
 curl -X POST http://localhost:3003/payments/:ORDER_ID/process \
   -H "Content-Type: application/json" \
   -d '{"paymentMethod": "PIX"}'
+
+## POSTMAN
+
+### user-service:
+
+- GET http://localhost:3000/users
+- GET http://localhost:3000/users/1
+- POSThttp://localhost:3000/users
+
+```json
+  {
+    "name": "Faustão",
+    "email": "fausto@gmail.com",
+    "role": "CLIENT"
+  }
+```
+
+### order-service:
+
+- GET http://localhost:3002/pedidos
+- POST http://localhost:3002/pedidos
+
+```json
+  {
+      "userId": 1,
+      "items": [
+          {
+              "productId": 2,
+              "quantity": 10
+          }
+      ]
+  }
+```
+
+### product-service:
+
+- GET http://localhost:3001/produtos
+- GET http://localhost:3001/produtos/1
+- POST http://localhost:3001/produtos
+
+```json
+  {
+      "name": "Caneca Gamer RGB",
+      "price": 99.90,
+      "stock": 10
+  }
+```
+- PUT http://localhost:3001/produtos/1
+
+```json
+{
+    "price": 59.90
+}
+```
+
+- POST http://localhost:3001/produtos/2/estoque
+
+```json
+{
+    "amount": 25
+}
+```
+
+- DELETE http://localhost:3001/produtos/2
+
+### payment-service:
+
+- POST http://localhost:3003/payments/:ORDER_ID/process
+
+```json
+{
+    "paymentMethod": "PIX"
+}
+```
